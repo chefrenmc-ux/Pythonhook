@@ -1,0 +1,9 @@
+{
+  "Service": "Haircut",
+  "Phone": "+1234567890",
+  "Stylist": "Alex",
+  "Date": "2024-09-17",
+  "Use_name": "Test User",
+  "Time": "10:30",
+  "action": "schedule"
+}

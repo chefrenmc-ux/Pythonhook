@@ -1,0 +1,5 @@
+it needs to:
+
+- convert to swedish local time
+- understand days of the week
+- needs to decide a specific date and time from the incoming json
