@@ -36,7 +36,7 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
             body_text = raw_body.decode("utf-8")
         except UnicodeDecodeError:
             body_text = raw_body.decode("utf-8", errors="replace")
-        logger.warning("Validation failure on /book", extra={"errors": exc.errors(), "body": body_text})
+        logger.warning("Validation failure on /book: errors=%s body=%s", exc.errors(), body_text)
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
@@ -115,7 +115,7 @@ async def validate(request: ValidationRequest) -> ValidationResponse:
 @app.post("/book", response_model=BookResponse)
 async def book_appointment(request: BookRequest) -> BookResponse:
     payload = request.model_dump(exclude_none=True)
-    logger.info("Validated /book request payload", extra={"payload": payload})
+    logger.info("Validated /book request payload: %s", payload)
 
     missing, empty, _ = validator.validate_payload(
         payload,
