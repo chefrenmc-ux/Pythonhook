@@ -1,0 +1,306 @@
+{
+  "name": "Murres Harstudio Booking Flow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-600, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "murres-booking",
+        "responseMode": "onReceived",
+        "options": {
+          "responseContentType": "application/json"
+        }
+      }
+    },
+    {
+      "id": "2",
+      "name": "Intent Agent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [-350, 0],
+      "parameters": {
+        "functionCode": "return items.map(item => {\n  const action = (item.json.action || '').toLowerCase();\n  if (['book', 'cancel', 'reschedule', 'feedback'].includes(action)) {\n    item.json.intent = action;\n  } else {\n    item.json.intent = 'book';\n  }\n  return item;\n});"
+      }
+    },
+    {
+      "id": "3",
+      "name": "Route Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [-100, 0],
+      "parameters": {
+        "propertyName": "={{$json.intent}}",
+        "dataType": "string",
+        "fallbackOutput": 0,
+        "rules": [
+          { "operation": "equal", "value1": "book" },
+          { "operation": "equal", "value1": "cancel" },
+          { "operation": "equal", "value1": "reschedule" },
+          { "operation": "equal", "value1": "feedback" }
+        ]
+      }
+    },
+    {
+      "id": "4",
+      "name": "Booking Agent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [150, 200],
+      "parameters": {
+        "functionCode": "return items.map(item => {\n  const data = item.json;\n  item.json.service_type = data.Service || data.service_type || '';\n  item.json.customer_name = data.Use_name || data.customer_name || '';\n  item.json.preferred_stylist = data.Stylist || data.preferred_stylist || 'Valfri frisör';\n  item.json.customer_phone = data.Phone || data.customer_phone || '';\n  item.json.customer_email = data.email || data.customer_email || '';\n  item.json.notes = data.notes || '';\n  item.json.start_iso = `${data.Date}T${data.Time}`;\n  return item;\n});"
+      }
+    },
+    {
+      "id": "5",
+      "name": "Availability Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [400, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.murres-harstudio.example/availability",
+        "responseFormat": "json",
+        "jsonParameters": true,
+        "options": {
+          "timeout": 20000
+        },
+        "bodyParametersJson": "={\"service\": $json.service_type, \"stylist\": $json.preferred_stylist, \"start\": $json.start_iso}"
+      }
+    },
+    {
+      "id": "6",
+      "name": "Calendar Create",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [650, 200],
+      "parameters": {
+        "operation": "create",
+        "calendar": "Primary",
+        "start": "={{$json.start_iso}}",
+        "end": "={{$json.start_iso}}",
+        "options": {
+          "summary": "={{$json.service_type}} – {{$json.customer_name}} (Frisör: {{$json.preferred_stylist}})",
+          "description": "={{$json.notes}}\nEmail: {{$json.customer_email}}\nTelefon: {{$json.customer_phone}}",
+          "location": "Murres Harstudio"
+        }
+      }
+    },
+    {
+      "id": "7",
+      "name": "Gmail Booking Confirm",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [900, 200],
+      "parameters": {
+        "operation": "send",
+        "toEmail": "={{$json.customer_email}}",
+        "subject": "={{`Bokningsbekräftelse: ${$json.service_type}`}}",
+        "text": "Hej {{$json.customer_name}},\n\nDin tid är bokad hos Murres Harstudio. Vi ses {{$json.start_iso}} med {{$json.preferred_stylist}}.\n\nVänliga hälsningar,\nMurres Harstudio"
+      }
+    },
+    {
+      "id": "8",
+      "name": "Cancel Agent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [150, 400],
+      "parameters": {
+        "functionCode": "return items.map(item => {\n  item.json.cancellation_reason = item.json.reason || 'Ej angivet';\n  return item;\n});"
+      }
+    },
+    {
+      "id": "9",
+      "name": "Calendar Delete",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [400, 400],
+      "parameters": {
+        "operation": "delete",
+        "calendar": "Primary",
+        "eventId": "={{$json.event_id}}"
+      }
+    },
+    {
+      "id": "10",
+      "name": "Gmail Cancel",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [650, 400],
+      "parameters": {
+        "operation": "send",
+        "toEmail": "={{$json.customer_email}}",
+        "subject": "Din tid är avbokad",
+        "text": "Hej {{$json.customer_name}},\n\nVi har avbokat din tid hos Murres Harstudio. Hör av dig om du vill boka en ny tid.\n\nVänliga hälsningar,\nMurres Harstudio"
+      }
+    },
+    {
+      "id": "11",
+      "name": "Reschedule Agent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [150, 600],
+      "parameters": {
+        "functionCode": "return items.map(item => {\n  const data = item.json;\n  item.json.new_start_iso = `${data.newDate || data.Date}T${data.newTime || data.Time}`;\n  return item;\n});"
+      }
+    },
+    {
+      "id": "12",
+      "name": "Calendar Update",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [400, 600],
+      "parameters": {
+        "operation": "update",
+        "calendar": "Primary",
+        "eventId": "={{$json.event_id}}",
+        "start": "={{$json.new_start_iso}}",
+        "end": "={{$json.new_start_iso}}",
+        "options": {
+          "summary": "={{$json.service_type}} – {{$json.customer_name}} (Frisör: {{$json.preferred_stylist}})",
+          "description": "={{$json.notes}}\nEmail: {{$json.customer_email}}\nTelefon: {{$json.customer_phone}}"
+        }
+      }
+    },
+    {
+      "id": "13",
+      "name": "Gmail Reschedule Confirm",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [650, 600],
+      "parameters": {
+        "operation": "send",
+        "toEmail": "={{$json.customer_email}}",
+        "subject": "={{`Ombokningsbekräftelse: ${$json.service_type}`}}",
+        "text": "Hej {{$json.customer_name}},\n\nDin tid är nu ombokad till {{$json.new_start_iso}} med {{$json.preferred_stylist}}.\n\nVänliga hälsningar,\nMurres Harstudio"
+      }
+    },
+    {
+      "id": "14",
+      "name": "Feedback Agent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [150, 800],
+      "parameters": {
+        "functionCode": "return items.map(item => {\n  item.json.feedback = item.json.feedback || '';\n  return item;\n});"
+      }
+    },
+    {
+      "id": "15",
+      "name": "Gmail Admin",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [400, 800],
+      "parameters": {
+        "operation": "send",
+        "toEmail": "admin@murres-harstudio.example",
+        "subject": "Ny feedback från kund",
+        "text": "Kund: {{$json.customer_name}}\nTelefon: {{$json.customer_phone}}\nFeedback: {{$json.feedback}}"
+      }
+    },
+    {
+      "id": "16",
+      "name": "Gmail Thanks",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [650, 800],
+      "parameters": {
+        "operation": "send",
+        "toEmail": "={{$json.customer_email}}",
+        "subject": "Tack för din feedback",
+        "text": "Hej {{$json.customer_name}},\n\nTack för att du tog dig tid att lämna feedback till Murres Harstudio.\n\nVänliga hälsningar,\nMurres Harstudio"
+      }
+    },
+    {
+      "id": "17",
+      "name": "Bokning",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, 120],
+      "parameters": {
+        "note": "Bokning"
+      }
+    },
+    {
+      "id": "18",
+      "name": "Avbokning",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, 320],
+      "parameters": {
+        "note": "Avbokning"
+      }
+    },
+    {
+      "id": "19",
+      "name": "Ombokning",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, 520],
+      "parameters": {
+        "note": "Ombokning"
+      }
+    },
+    {
+      "id": "20",
+      "name": "Feedback",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, 720],
+      "parameters": {
+        "note": "Feedback"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "Intent Agent", "type": "main", "index": 0 }]]
+    },
+    "Intent Agent": {
+      "main": [[{ "node": "Route Intent", "type": "main", "index": 0 }]]
+    },
+    "Route Intent": {
+      "main": [
+        [{ "node": "Booking Agent", "type": "main", "index": 0 }],
+        [{ "node": "Cancel Agent", "type": "main", "index": 0 }],
+        [{ "node": "Reschedule Agent", "type": "main", "index": 0 }],
+        [{ "node": "Feedback Agent", "type": "main", "index": 0 }]
+      ]
+    },
+    "Booking Agent": {
+      "main": [[{ "node": "Availability Check", "type": "main", "index": 0 }]]
+    },
+    "Availability Check": {
+      "main": [[{ "node": "Calendar Create", "type": "main", "index": 0 }]]
+    },
+    "Calendar Create": {
+      "main": [[{ "node": "Gmail Booking Confirm", "type": "main", "index": 0 }]]
+    },
+    "Cancel Agent": {
+      "main": [[{ "node": "Calendar Delete", "type": "main", "index": 0 }]]
+    },
+    "Calendar Delete": {
+      "main": [[{ "node": "Gmail Cancel", "type": "main", "index": 0 }]]
+    },
+    "Reschedule Agent": {
+      "main": [[{ "node": "Calendar Update", "type": "main", "index": 0 }]]
+    },
+    "Calendar Update": {
+      "main": [[{ "node": "Gmail Reschedule Confirm", "type": "main", "index": 0 }]]
+    },
+    "Feedback Agent": {
+      "main": [[{ "node": "Gmail Admin", "type": "main", "index": 0 }]]
+    },
+    "Gmail Admin": {
+      "main": [[{ "node": "Gmail Thanks", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "auto"
+  },
+  "pinData": {},
+  "staticData": {}
+}
