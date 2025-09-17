@@ -1,13 +1,17 @@
+# Aurora Polaris 2025. All rights reserved.
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from typing import Any, Dict, List, Sequence
 from zoneinfo import ZoneInfo
 
 import httpx
 from dateutil import parser as date_parser
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 import validate_payload as validator
 
@@ -15,7 +19,25 @@ WEBHOOK_URL = "https://hook.eu2.make.com/e73ginw1b4moa9gypzuf8qwh4c29fo2x"
 STOCKHOLM_TZ = ZoneInfo("Europe/Stockholm")
 ASSUMED_SOURCE_TZ = ZoneInfo("UTC")
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("payload_validator")
+
 app = FastAPI(title="Payload Validator", version="1.1.0")
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    if request.url.path == "/book":
+        try:
+            raw_body = await request.body()
+        except Exception:  # pragma: no cover
+            raw_body = b""
+        try:
+            body_text = raw_body.decode("utf-8")
+        except UnicodeDecodeError:
+            body_text = raw_body.decode("utf-8", errors="replace")
+        logger.warning("Validation failure on /book", extra={"errors": exc.errors(), "body": body_text})
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 class ValidationRequest(BaseModel):
@@ -46,12 +68,13 @@ class BookRequest(BaseModel):
     Phone: str
     Stylist: str | None = None
     Date: str
-    Use_name: str
+    Use_name: str | None = Field(default=None, alias="User_Name")
     Time: str
     action: str
 
     model_config = {
         "extra": "allow",
+        "populate_by_name": True,
     }
 
 
@@ -91,7 +114,8 @@ async def validate(request: ValidationRequest) -> ValidationResponse:
 
 @app.post("/book", response_model=BookResponse)
 async def book_appointment(request: BookRequest) -> BookResponse:
-    payload = request.model_dump()
+    payload = request.model_dump(exclude_none=True)
+    logger.info("Validated /book request payload", extra={"payload": payload})
 
     missing, empty, _ = validator.validate_payload(
         payload,
@@ -166,14 +190,17 @@ def _build_required_fields(
             continue
         seen.add(field)
         ordered.append(field)
+    if not ordered:
+        return list(validator.DEFAULT_REQUIRED_FIELDS)
     return ordered
 
 
 def _normalize_booking_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], datetime]:
     normalized = dict(payload)
 
-    if "Use_name" not in normalized or not normalized["Use_name"]:
-        raise ValueError("'Use_name' must be provided and non-empty.")
+    user_name = normalized.get("Use_name") or normalized.get("User_Name")
+    if not user_name:
+        raise ValueError("'Use_name' or 'User_Name' must be provided and non-empty.")
 
     stockholm_dt = _parse_to_stockholm(normalized["Date"], normalized["Time"])
 
@@ -181,7 +208,8 @@ def _normalize_booking_payload(payload: dict[str, Any]) -> tuple[dict[str, Any],
     normalized["Time"] = stockholm_dt.strftime("%H:%M")
     normalized["Weekday"] = stockholm_dt.strftime("%A")
     normalized["ISODateTime"] = stockholm_dt.isoformat()
-    normalized["User_Name"] = normalized.pop("Use_name")
+    normalized["User_Name"] = user_name
+    normalized.pop("Use_name", None)
 
     return normalized, stockholm_dt
 

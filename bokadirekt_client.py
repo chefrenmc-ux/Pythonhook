@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Aurora Polaris 2025. All rights reserved.
 """Minimal helper for the Bokadirekt public API (https://external.api.portal.bokadirekt.se)."""
 from __future__ import annotations
 

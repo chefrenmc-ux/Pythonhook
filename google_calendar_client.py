@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Aurora Polaris 2025. All rights reserved.
 """Utilities and CLI helpers for Google Calendar operations."""
 from __future__ import annotations
 
